@@ -1,0 +1,79 @@
+name: "Terraform Force Unlock"
+description: "Force unlocks a Terraform state lock if present"
+inputs:
+  working-directory:
+    description: "Directory to run Terraform in"
+    required: true
+  workspace:
+    description: "Terraform workspace name (optional, defaults to current workspace)"
+    required: false
+runs:
+  using: "composite"
+  steps:
+    - name: Force unlock Terraform state if locked
+      shell: bash
+      run: |
+        set -euo pipefail
+        cd '${{ inputs.working-directory }}'
+
+        echo "::group::🔓 Checking for Terraform state lock"
+
+        # Select workspace if specified
+        if [ -n "${{ inputs.workspace }}" ]; then
+          echo "Selecting workspace: ${{ inputs.workspace }}"
+          terraform workspace select "${{ inputs.workspace }}" || {
+            echo "::warning ::Could not select workspace '${{ inputs.workspace }}', using current workspace"
+          }
+        fi
+
+        # Detect lock by attempting force-unlock with a bogus ID.
+        # This avoids terraform plan which fails on required variables.
+        LOCK_OUTPUT=""
+        LOCK_ID=""
+        PROBE_ID="lock-probe-$(date +%s)"
+
+        if ! LOCK_OUTPUT=$(terraform force-unlock -force "$PROBE_ID" -no-color 2>&1); then
+          if echo "$LOCK_OUTPUT" | grep -q "Lock Info:"; then
+            LOCK_ID=$(echo "$LOCK_OUTPUT" | sed -n '/Lock Info:/,/^$/p' | grep 'ID:' | sed 's/.*ID:[[:space:]]*//' || echo "")
+
+            if [ -n "$LOCK_ID" ]; then
+              echo "::warning ::🔒 Terraform state is locked"
+              echo "Lock ID: $LOCK_ID"
+
+              echo "Lock details:"
+              echo "$LOCK_OUTPUT" | sed -n '/Lock Info:/,/^$/p' | head -10
+
+              echo "::notice ::🔓 Attempting to force unlock state..."
+              if terraform force-unlock -force "$LOCK_ID"; then
+                echo "::notice ::✅ Successfully unlocked Terraform state"
+
+                # Verify unlock was successful
+                if VERIFY_OUTPUT=$(terraform force-unlock -force "verify-$(date +%s)" -no-color 2>&1); then
+                  echo "::warning ::⚠️ Unlock may not have been successful - please verify manually"
+                else
+                  if echo "$VERIFY_OUTPUT" | grep -qi "NoSuchKey\|not locked"; then
+                    echo "::notice ::✅ Verified: State is now unlocked"
+                  else
+                    echo "::warning ::⚠️ Could not verify unlock status - please check manually"
+                  fi
+                fi
+              else
+                echo "::error ::❌ Failed to unlock Terraform state"
+                echo "::error ::You may need to unlock manually"
+              fi
+            else
+              echo "::warning ::Could not extract lock ID from Terraform output"
+              echo "Raw output:"
+              echo "$LOCK_OUTPUT"
+            fi
+          elif echo "$LOCK_OUTPUT" | grep -qi "NoSuchKey\|not locked"; then
+            echo "::notice ::✅ No Terraform state lock detected"
+          else
+            echo "::warning ::Unexpected error while checking for lock:"
+            echo "$LOCK_OUTPUT"
+          fi
+        else
+          echo "::notice ::✅ No Terraform state lock detected"
+        fi
+
+        echo "::endgroup::"
