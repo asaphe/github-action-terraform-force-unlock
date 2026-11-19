@@ -14,15 +14,15 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        cd '${{ inputs.working-directory }}'
+        cd "${INPUTS_WORKING_DIRECTORY}"
 
         echo "::group::🔓 Checking for Terraform state lock"
 
         # Select workspace if specified
-        if [ -n "${{ inputs.workspace }}" ]; then
-          echo "Selecting workspace: ${{ inputs.workspace }}"
-          terraform workspace select "${{ inputs.workspace }}" || {
-            echo "::warning ::Could not select workspace '${{ inputs.workspace }}', using current workspace"
+        if [ -n "${INPUTS_WORKSPACE}" ]; then
+          echo "Selecting workspace: ${INPUTS_WORKSPACE}"
+          terraform workspace select "${INPUTS_WORKSPACE}" || {
+            echo "::warning ::Could not select workspace '${INPUTS_WORKSPACE}', using current workspace"
           }
         fi
 
@@ -77,3 +77,6 @@ runs:
         fi
 
         echo "::endgroup::"
+      env:
+        INPUTS_WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        INPUTS_WORKSPACE: ${{ inputs.workspace }}
